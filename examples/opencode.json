@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "minsync": {
+      "type": "local",
+      "command": ["C:\\Path\\To\\MinSync\\.venv\\Scripts\\minsync.exe", "serve"],
+      "cwd": "C:\\Path\\To\\MinSync",
+      "enabled": true,
+      "environment": {
+        "MINSYNC_DATA_DIR": "C:\\Users\\YOURNAME\\AppData\\Local\\MinSync"
+      }
+    }
+  }
+}

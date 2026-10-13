@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "minsync"
+version = "1.0.0"
+description = "MinSync - isolated Docker command executor and MCP server for AI agents (Windows 11 target)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "MinSync contributors" }]
+dependencies = [
+  "mcp==1.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+]
+
+[project.scripts]
+minsync = "minsync.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/minsync"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+  "docker: requires a running Docker Engine (skipped when unavailable)",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
