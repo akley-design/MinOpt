@@ -2,7 +2,7 @@
 list tools, call them through an MCP client session. Docker-dependent
 execution is exercised only as a structured docker_unavailable error here
 (the sandbox has no Docker); live execution is in tests/integration."""
-import asyncio
+
 import json
 import os
 import sys
@@ -13,13 +13,33 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 EXPECTED_TOOLS = {
-    "minsync_info", "environment_info", "list_profiles", "health_check",
-    "create_workspace", "list_workspaces", "inspect_workspace", "list_files",
-    "read_file", "write_file", "edit_file", "search_files", "delete_workspace",
-    "run_command", "run_parallel", "get_task_status", "get_task_output",
-    "cancel_task", "install_dependencies", "build_project", "run_tests",
-    "delete_file", "list_tasks",
-    "upload_archive", "extract_archive", "create_archive", "list_artifacts",
+    "minsync_info",
+    "environment_info",
+    "list_profiles",
+    "health_check",
+    "create_workspace",
+    "list_workspaces",
+    "inspect_workspace",
+    "list_files",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "search_files",
+    "delete_workspace",
+    "run_command",
+    "run_parallel",
+    "get_task_status",
+    "get_task_output",
+    "cancel_task",
+    "install_dependencies",
+    "build_project",
+    "run_tests",
+    "delete_file",
+    "list_tasks",
+    "upload_archive",
+    "extract_archive",
+    "create_archive",
+    "list_artifacts",
     "get_artifact",
 }
 
@@ -36,8 +56,7 @@ async def test_stdio_full_flow(tmp_path):
     env = dict(os.environ)
     env["MINSYNC_DATA_DIR"] = str(tmp_path / "data")
     env["PYTHONPATH"] = str(ROOT / "src")
-    params = StdioServerParameters(
-        command=sys.executable, args=["-m", "minsync", "serve"], env=env)
+    params = StdioServerParameters(command=sys.executable, args=["-m", "minsync", "serve"], env=env)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -56,13 +75,11 @@ async def test_stdio_full_flow(tmp_path):
             ws = await call("create_workspace", name="e2e", profile="python")
             assert ws["ok"], ws
             wid = ws["id"]
-            assert (await call("write_file", workspace_id=wid, path="main.py",
-                               content="print('hi')"))["ok"]
+            assert (await call("write_file", workspace_id=wid, path="main.py", content="print('hi')"))["ok"]
             assert "hi" in (await call("read_file", workspace_id=wid, path="main.py"))["content"]
 
             # No Docker in this environment -> structured error, NOT host exec, NOT crash.
-            run = await call("run_command", workspace_id=wid, profile="python",
-                             argv=["python3", "main.py"])
+            run = await call("run_command", workspace_id=wid, profile="python", argv=["python3", "main.py"])
             if not info["docker"]["available"]:
                 assert run["status"] == "failed"
                 assert run["error_code"] in ("docker_unavailable", "image_missing")

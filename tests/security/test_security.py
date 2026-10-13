@@ -1,5 +1,6 @@
 """Security-focused tests. Source-level checks PLUS (docker-marked) live
 isolation checks that run only when a real Docker Engine exists."""
+
 import inspect
 import sys
 from pathlib import Path
@@ -8,7 +9,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from minsync import server as server_mod
-from minsync.docker_backend import DockerBackend
 
 
 def test_no_host_shell_execution_of_user_code():
@@ -42,6 +42,7 @@ def test_symlink_escape_rejected(app, tmp_path):
     except OSError:
         pytest.skip("symlinks not available")
     from minsync.errors import FileOperationError, PathTraversal
+
     with pytest.raises((PathTraversal, FileOperationError)):
         app.workspaces.read_file(ws["id"], "link.txt")
 
@@ -50,6 +51,7 @@ def test_archive_limits(app):
     ws = app.workspaces.create("lim")
     app.settings.max_archive_bytes = 10
     from minsync.errors import QuotaExceeded
+
     with pytest.raises(QuotaExceeded):
         app.workspaces.write_bytes(ws["id"], ".uploads/big.zip", b"x" * 11)
 

@@ -29,6 +29,7 @@ python-dotenv==1.2.4
 python-multipart==0.0.32
 referencing==0.37.0
 rpds-py==2026.9.1
+ruff==0.14.0
 sse-starlette==3.5.0
 starlette==1.8.0
 typing-inspection==0.4.4

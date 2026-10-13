@@ -1,4 +1,5 @@
 """Uniform MinSync errors. Every error carries a stable machine-readable code."""
+
 from __future__ import annotations
 
 

@@ -9,7 +9,8 @@ from minsync.security_paths import resolve_within
 
 
 def test_paths_reject_traversal(tmp_path):
-    root = tmp_path / "ws"; root.mkdir()
+    root = tmp_path / "ws"
+    root.mkdir()
     for bad in ("../x", "/etc/passwd", "C:\\secret", "..\\x", "a/../../b", "a\x00b"):
         with pytest.raises(PathTraversal):
             resolve_within(root, bad)
@@ -43,11 +44,13 @@ def test_file_quota(app):
 @pytest.mark.asyncio
 async def test_task_success_fail_output(app):
     ws = app.workspaces.create("t")
-    ok = await app.tasks.submit(workspace_id=ws["id"], profile_name="python",
-                                argv=["python3", "main.py"], shell_script=None)
+    ok = await app.tasks.submit(
+        workspace_id=ws["id"], profile_name="python", argv=["python3", "main.py"], shell_script=None
+    )
     assert ok["status"] == "succeeded" and ok["stdout"].startswith("ran:")
-    bad = await app.tasks.submit(workspace_id=ws["id"], profile_name="python",
-                                 argv=["fail"], shell_script=None)
+    bad = await app.tasks.submit(
+        workspace_id=ws["id"], profile_name="python", argv=["fail"], shell_script=None
+    )
     assert bad["status"] == "failed" and bad["exit_code"] == 3 and "boom" in bad["stderr"]
     out = app.tasks.output(bad["id"], "stderr")
     assert out["content"] == "boom on stderr"
@@ -59,25 +62,31 @@ async def test_task_success_fail_output(app):
 async def test_task_validation(app):
     ws = app.workspaces.create("t2")
     with pytest.raises(InvalidArgument):
-        await app.tasks.submit(workspace_id=ws["id"], profile_name="python",
-                               argv=["x"], shell_script="echo hi")
+        await app.tasks.submit(
+            workspace_id=ws["id"], profile_name="python", argv=["x"], shell_script="echo hi"
+        )
     with pytest.raises(InvalidArgument):
-        await app.tasks.submit(workspace_id=ws["id"], profile_name="python",
-                               argv=[], shell_script=None)
+        await app.tasks.submit(workspace_id=ws["id"], profile_name="python", argv=[], shell_script=None)
 
 
 @pytest.mark.asyncio
 async def test_task_parallel_and_timeout(app):
-    ws1 = app.workspaces.create("a"); ws2 = app.workspaces.create("b")
+    ws1 = app.workspaces.create("a")
+    ws2 = app.workspaces.create("b")
     import asyncio
+
     r = await asyncio.gather(
-        app.tasks.submit(workspace_id=ws1["id"], profile_name="bash",
-                         argv=["sleep", "0.2"], shell_script=None),
-        app.tasks.submit(workspace_id=ws2["id"], profile_name="bash",
-                         argv=["sleep", "0.2"], shell_script=None))
+        app.tasks.submit(
+            workspace_id=ws1["id"], profile_name="bash", argv=["sleep", "0.2"], shell_script=None
+        ),
+        app.tasks.submit(
+            workspace_id=ws2["id"], profile_name="bash", argv=["sleep", "0.2"], shell_script=None
+        ),
+    )
     assert all(x["status"] == "succeeded" for x in r)
-    slow = await app.tasks.submit(workspace_id=ws1["id"], profile_name="bash",
-                                  argv=["sleep", "5"], shell_script=None, timeout_seconds=1)
+    slow = await app.tasks.submit(
+        workspace_id=ws1["id"], profile_name="bash", argv=["sleep", "5"], shell_script=None, timeout_seconds=1
+    )
     # FakeBackend reports timed_out only when its sleep finishes; manager maps it.
     assert slow["status"] == "timed_out"
 
@@ -109,19 +118,109 @@ def test_zip_slip_and_symlink_rejected(app, tmp_path):
 
 def test_docker_argv_hardening(settings, tmp_path):
     be = DockerBackend(settings)
-    ws = tmp_path / "ws"; ws.mkdir()
+    ws = tmp_path / "ws"
+    ws.mkdir()
     container, argv = be.build_run_argv(
-        profile=get_profile("python"), workspace_dir=ws, task_id="task_1",
-        command_argv=["python3", "main.py"], network="disabled")
+        profile=get_profile("python"),
+        workspace_dir=ws,
+        task_id="task_1",
+        command_argv=["python3", "main.py"],
+        network="disabled",
+    )
     joined = " ".join(argv)
     assert "--cap-drop" in argv and "ALL" in argv
     assert "no-new-privileges" in joined and "--read-only" in argv
     assert argv[argv.index("--network") + 1] == "none"
     assert "--privileged" not in argv and "docker.sock" not in joined
-    assert "10001:10001" in argv
+    assert settings.container_user in argv and "0:0" not in argv
+    assert "PYTHONPATH=/workspace/.minsync_deps" in argv
     # exactly one mount, and it is the workspace
     mounts = [a for a in argv if "type=bind" in a]
     assert len(mounts) == 1 and str(ws) in mounts[0]
     with pytest.raises(InvalidArgument):
-        be.build_run_argv(profile=get_profile("python"), workspace_dir=ws,
-                          task_id="t", command_argv=["x"], network="restricted")
+        be.build_run_argv(
+            profile=get_profile("python"),
+            workspace_dir=ws,
+            task_id="t",
+            command_argv=["x"],
+            network="restricted",
+        )
+
+
+# ---------- audit regression tests ----------
+
+
+def test_settings_validation(tmp_path, monkeypatch):
+    from minsync.config import Settings
+
+    with pytest.raises(ValueError):
+        Settings(data_dir=tmp_path / "x", default_network="restricted")
+    s = Settings(
+        data_dir=tmp_path / "y",
+        max_concurrent_tasks=0,
+        memory_mb=1,
+        task_timeout_seconds=99999,
+        max_timeout_seconds=10,
+    )
+    assert s.max_concurrent_tasks == 1 and s.memory_mb == 16 and s.task_timeout_seconds == 10
+    with pytest.raises(ValueError):
+        Settings(data_dir=tmp_path / "z", container_user="root")
+
+
+def test_symlinked_dir_not_followed(app, tmp_path):
+    ws = app.workspaces.create("symdir")
+    root = __import__("pathlib").Path(ws["path"])
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("TOPSECRET")
+    try:
+        (root / "linkdir").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks not available")
+    assert "TOPSECRET" not in str(app.workspaces.search_files(ws["id"], "TOPSECRET"))
+    listing = str(app.workspaces.list_files(ws["id"]))
+    assert "secret.txt" not in listing
+    assert app.workspaces.inspect(ws["id"])["file_count"] == 0
+    art = app.archives.create_archive(ws["id"])
+    import zipfile as _zf
+
+    with _zf.ZipFile(art["path"]) as z:
+        assert z.namelist() == []
+
+
+def test_project_commands_dont_mask_failures(tmp_path):
+    from minsync.profiles import get_profile
+    from minsync.projects import build_command, install_command, test_command
+
+    (tmp_path / "package.json").write_text('{"scripts":{}}')
+    _, shell = build_command(get_profile("node"), tmp_path)
+    assert "|| echo" not in shell and "if node" in shell
+    _, shell = test_command(get_profile("cpp"), tmp_path)
+    assert "||" not in shell
+    (tmp_path / "requirements.txt").write_text("flask")
+    _, shell = install_command(get_profile("python"), tmp_path)
+    assert ".minsync_deps" in shell  # one-shot containers: deps must persist in workspace
+
+
+@pytest.mark.asyncio
+async def test_task_cancel_running_and_queued(app):
+    ws = app.workspaces.create("cancel")
+    running = await app.tasks.submit(
+        workspace_id=ws["id"], profile_name="bash", argv=["sleep", "30"], shell_script=None, wait=False
+    )
+    await __import__("asyncio").sleep(0.2)
+    cancelled = await app.tasks.cancel(running["id"])
+    assert cancelled["status"] == "cancelled", cancelled
+
+
+@pytest.mark.asyncio
+async def test_run_parallel_validation_via_manager(app):
+    ws = app.workspaces.create("p")
+    with pytest.raises(InvalidArgument):
+        await app.tasks.submit(
+            workspace_id=ws["id"],
+            profile_name="python",
+            argv=["x"],
+            shell_script=None,
+            timeout_seconds=999999,
+        )

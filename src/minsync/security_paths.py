@@ -1,6 +1,7 @@
 """Path safety: workspaces are addressed by ID, files by workspace-relative
 paths only. Absolute paths, drive letters, '..', NUL and symlink escapes are
 rejected."""
+
 from __future__ import annotations
 
 import re

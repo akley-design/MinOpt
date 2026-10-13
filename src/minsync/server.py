@@ -3,6 +3,7 @@ All tools return JSON-serialisable dicts: {"ok": true, ...} or
 {"ok": false, "error": {"code", "message", "details"}}.
 Nothing except MCP protocol frames is written to stdout (stdio transport).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -32,13 +33,15 @@ def _wrap(fn):
             return {"ok": False, "error": e.to_dict()}
         except Exception as e:  # last-resort: never crash the MCP session
             log.exception("tool failure")
-            return {"ok": False, "error": {"code": "internal_error",
-                                           "message": f"{type(e).__name__}: {e}", "details": {}}}
+            return {
+                "ok": False,
+                "error": {"code": "internal_error", "message": f"{type(e).__name__}: {e}", "details": {}},
+            }
+
     return inner
 
 
-def create_server(app: MinSyncApp | None = None, *, host: str = "127.0.0.1",
-                  port: int = 8765) -> FastMCP:
+def create_server(app: MinSyncApp | None = None, *, host: str = "127.0.0.1", port: int = 8765) -> FastMCP:
     app = app or MinSyncApp()
     mcp = FastMCP("minsync", host=host, port=port)
 
@@ -47,8 +50,12 @@ def create_server(app: MinSyncApp | None = None, *, host: str = "127.0.0.1",
     @_wrap
     async def minsync_info() -> dict:
         """MinSync service/version/settings overview."""
-        return {"service": "minsync", "version": VERSION, "settings": app.settings.public_dict(),
-                "transports": ["stdio", "streamable-http (loopback only)"]}
+        return {
+            "service": "minsync",
+            "version": VERSION,
+            "settings": app.settings.public_dict(),
+            "transports": ["stdio", "streamable-http (loopback only)"],
+        }
 
     @mcp.tool()
     @_wrap
@@ -129,17 +136,28 @@ def create_server(app: MinSyncApp | None = None, *, host: str = "127.0.0.1",
     # ---------- execution ----------
     @mcp.tool()
     @_wrap
-    async def run_command(workspace_id: str, profile: str, argv: list[str] | None = None,
-                          shell_script: str | None = None, network: str = "disabled",
-                          timeout_seconds: int = 0, wait: bool = True) -> dict:
+    async def run_command(
+        workspace_id: str,
+        profile: str,
+        argv: list[str] | None = None,
+        shell_script: str | None = None,
+        network: str = "disabled",
+        timeout_seconds: int = 0,
+        wait: bool = True,
+    ) -> dict:
         """Run a command ONLY inside a hardened Docker container for `profile`.
         Prefer argv (no shell). shell_script runs via sh -c INSIDE the container.
         network: 'disabled' (default, no network) or 'approved' (plain bridge,
         unrestricted - explicit opt-in). Client cannot set images/mounts/flags."""
         return await app.tasks.submit(
-            workspace_id=workspace_id, profile_name=profile, argv=argv,
-            shell_script=shell_script, network=network,
-            timeout_seconds=(timeout_seconds or None), wait=wait)
+            workspace_id=workspace_id,
+            profile_name=profile,
+            argv=argv,
+            shell_script=shell_script,
+            network=network,
+            timeout_seconds=(timeout_seconds or None),
+            wait=wait,
+        )
 
     @mcp.tool()
     @_wrap
@@ -149,14 +167,24 @@ def create_server(app: MinSyncApp | None = None, *, host: str = "127.0.0.1",
         Each item: {workspace_id, profile, argv|shell_script, network?, timeout_seconds?}"""
         if not isinstance(commands, list) or not commands or len(commands) > 16:
             raise InvalidArgument("commands must be a list of 1..16 items")
-        results = await asyncio.gather(*[
-            app.tasks.submit(
-                workspace_id=c["workspace_id"], profile_name=c["profile"],
-                argv=c.get("argv"), shell_script=c.get("shell_script"),
-                network=c.get("network", "disabled"),
-                timeout_seconds=c.get("timeout_seconds"), wait=True)
-            for c in commands
-        ], return_exceptions=True)
+        for c in commands:
+            if not isinstance(c, dict) or not c.get("workspace_id") or not c.get("profile"):
+                raise InvalidArgument("each command must be an object with workspace_id and profile")
+        results = await asyncio.gather(
+            *[
+                app.tasks.submit(
+                    workspace_id=c["workspace_id"],
+                    profile_name=c["profile"],
+                    argv=c.get("argv"),
+                    shell_script=c.get("shell_script"),
+                    network=c.get("network", "disabled"),
+                    timeout_seconds=c.get("timeout_seconds"),
+                    wait=True,
+                )
+                for c in commands
+            ],
+            return_exceptions=True,
+        )
         out = []
         for r in results:
             if isinstance(r, MinSyncError):
@@ -174,8 +202,9 @@ def create_server(app: MinSyncApp | None = None, *, host: str = "127.0.0.1",
 
     @mcp.tool()
     @_wrap
-    async def get_task_output(task_id: str, stream: str = "stdout",
-                              offset: int = 0, limit: int = 65536) -> dict:
+    async def get_task_output(
+        task_id: str, stream: str = "stdout", offset: int = 0, limit: int = 65536
+    ) -> dict:
         """Fetch a slice of task output (never an unbounded blob)."""
         return app.tasks.output(task_id, stream, offset, limit)
 
@@ -190,38 +219,43 @@ def create_server(app: MinSyncApp | None = None, *, host: str = "127.0.0.1",
         return {"tasks": app.tasks.list(workspace_id or None)}
 
     # ---------- projects ----------
-    async def _project_cmd(workspace_id: str, profile: str, kind: str, fn,
-                           network: str, timeout_seconds: int) -> dict:
+    async def _project_cmd(
+        workspace_id: str, profile: str, kind: str, fn, network: str, timeout_seconds: int
+    ) -> dict:
         root = app.workspaces.root(workspace_id)
         prof = profiles_mod.get_profile(profile)
         argv, shell = fn(prof, root)
         return await app.tasks.submit(
-            workspace_id=workspace_id, profile_name=profile, argv=argv,
-            shell_script=shell, kind=kind, network=network,
-            timeout_seconds=(timeout_seconds or None), wait=True)
+            workspace_id=workspace_id,
+            profile_name=profile,
+            argv=argv,
+            shell_script=shell,
+            kind=kind,
+            network=network,
+            timeout_seconds=(timeout_seconds or None),
+            wait=True,
+        )
 
     @mcp.tool()
     @_wrap
-    async def install_dependencies(workspace_id: str, profile: str,
-                                   network: str = "approved", timeout_seconds: int = 600) -> dict:
+    async def install_dependencies(
+        workspace_id: str, profile: str, network: str = "approved", timeout_seconds: int = 600
+    ) -> dict:
         """Install project dependencies inside the container. Needs network,
         so network defaults to 'approved' (explicit, unrestricted bridge)."""
-        return await _project_cmd(workspace_id, profile, "install", install_command,
-                                  network, timeout_seconds)
+        return await _project_cmd(workspace_id, profile, "install", install_command, network, timeout_seconds)
 
     @mcp.tool()
     @_wrap
     async def build_project(workspace_id: str, profile: str, timeout_seconds: int = 600) -> dict:
         """Build the project inside its profile container (offline by default)."""
-        return await _project_cmd(workspace_id, profile, "build", build_command,
-                                  "disabled", timeout_seconds)
+        return await _project_cmd(workspace_id, profile, "build", build_command, "disabled", timeout_seconds)
 
     @mcp.tool()
     @_wrap
     async def run_tests(workspace_id: str, profile: str, timeout_seconds: int = 600) -> dict:
         """Run the profile's test command inside the container."""
-        return await _project_cmd(workspace_id, profile, "test", test_command,
-                                  "disabled", timeout_seconds)
+        return await _project_cmd(workspace_id, profile, "test", test_command, "disabled", timeout_seconds)
 
     # ---------- archives / artifacts ----------
     @mcp.tool()
@@ -235,19 +269,19 @@ def create_server(app: MinSyncApp | None = None, *, host: str = "127.0.0.1",
             data = base64.b64decode(data_base64, validate=True)
         except (binascii.Error, ValueError):
             raise InvalidArgument("data_base64 is not valid base64") from None
-        return app.workspaces.write_bytes(workspace_id, f".uploads/{filename}", data)
+        return await asyncio.to_thread(app.workspaces.write_bytes, workspace_id, f".uploads/{filename}", data)
 
     @mcp.tool()
     @_wrap
     async def extract_archive(workspace_id: str, archive_path: str, dest: str = "") -> dict:
         """Safely extract a ZIP from inside the workspace (Zip-Slip/bomb guards)."""
-        return app.archives.extract_archive(workspace_id, archive_path, dest)
+        return await asyncio.to_thread(app.archives.extract_archive, workspace_id, archive_path, dest)
 
     @mcp.tool()
     @_wrap
     async def create_archive(workspace_id: str, name: str = "") -> dict:
         """Zip the workspace into a stored artifact (id, size, sha256, local path)."""
-        return app.archives.create_archive(workspace_id, name or None)
+        return await asyncio.to_thread(app.archives.create_archive, workspace_id, name or None)
 
     @mcp.tool()
     @_wrap

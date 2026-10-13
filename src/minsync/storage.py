@@ -1,5 +1,6 @@
 """SQLite (stdlib) metadata storage: workspaces, tasks, artifacts.
 No external database. One connection guarded by a lock; short transactions."""
+
 from __future__ import annotations
 
 import json
@@ -31,15 +32,22 @@ class Storage:
         self._lock = threading.Lock()
         with self._lock:
             self._conn.executescript(SCHEMA)
-            # Recovery: tasks left running by a crashed/killed MinSync are
-            # NOT successes. Mark them interrupted on startup.
-            self._conn.execute(
+            self._conn.commit()
+
+    def recover_interrupted(self) -> int:
+        """Mark tasks left queued/running by a dead process as interrupted.
+        Called ONLY by the execution-owning component (TaskManager on server
+        startup) - never by read-only diagnostics like `minsync doctor`,
+        which must not mutate a live server's state."""
+        with self._lock:
+            cur = self._conn.execute(
                 "UPDATE tasks SET status='failed', error_code='interrupted',"
                 " error_message='MinSync restarted before task finished', finished_at=?"
                 " WHERE status IN ('queued','running','cancelling')",
                 (time.time(),),
             )
             self._conn.commit()
+            return cur.rowcount
 
     # -- generic helpers -------------------------------------------------
     def _put(self, sql: str, params: tuple) -> None:
@@ -75,8 +83,15 @@ class Storage:
         self._put(
             "INSERT INTO tasks(id,workspace_id,profile,kind,command_json,status,created_at)"
             " VALUES (?,?,?,?,?,?,?)",
-            (t["id"], t["workspace_id"], t.get("profile"), t.get("kind", "run"),
-             json.dumps(t.get("command", {})), t["status"], t["created_at"]),
+            (
+                t["id"],
+                t["workspace_id"],
+                t.get("profile"),
+                t.get("kind", "run"),
+                json.dumps(t.get("command", {})),
+                t["status"],
+                t["created_at"],
+            ),
         )
 
     def update_task(self, task_id: str, **fields) -> None:
@@ -100,7 +115,8 @@ class Storage:
         cutoff = time.time() - retention_days * 86400
         with self._lock:
             cur = self._conn.execute(
-                "DELETE FROM tasks WHERE finished_at IS NOT NULL AND finished_at<?", (cutoff,))
+                "DELETE FROM tasks WHERE finished_at IS NOT NULL AND finished_at<?", (cutoff,)
+            )
             self._conn.commit()
             return cur.rowcount
 
@@ -108,8 +124,16 @@ class Storage:
     def add_artifact(self, a: dict) -> None:
         self._put(
             "INSERT INTO artifacts VALUES (?,?,?,?,?,?,?,?)",
-            (a["id"], a.get("workspace_id"), a.get("task_id"), a["filename"],
-             a["size"], a["sha256"], a["created_at"], a["path"]),
+            (
+                a["id"],
+                a.get("workspace_id"),
+                a.get("task_id"),
+                a["filename"],
+                a["size"],
+                a["sha256"],
+                a["created_at"],
+                a["path"],
+            ),
         )
 
     def get_artifact(self, aid: str) -> dict | None:
@@ -118,6 +142,6 @@ class Storage:
     def list_artifacts(self, workspace_id: str | None = None) -> list[dict]:
         if workspace_id:
             return self._all(
-                "SELECT * FROM artifacts WHERE workspace_id=? ORDER BY created_at DESC",
-                (workspace_id,))
+                "SELECT * FROM artifacts WHERE workspace_id=? ORDER BY created_at DESC", (workspace_id,)
+            )
         return self._all("SELECT * FROM artifacts ORDER BY created_at DESC")

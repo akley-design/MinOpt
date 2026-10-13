@@ -1,11 +1,19 @@
 """MinSync configuration. Values come from environment variables only;
-secrets are never logged and never passed to containers by default."""
+secrets are never logged and never passed to containers by default.
+
+All values are validated/clamped in __post_init__: a typo in an env var
+must fail loudly (network mode) or clamp to a sane bound (limits) instead
+of, e.g., creating a Semaphore(0) that deadlocks every task.
+"""
+
 from __future__ import annotations
 
 import os
 import platform
 from dataclasses import dataclass, field
 from pathlib import Path
+
+NETWORK_MODES = ("disabled", "approved")
 
 
 def default_data_dir() -> Path:
@@ -32,6 +40,17 @@ def _float(name: str, default: float) -> float:
         return default
 
 
+def _default_container_user() -> str:
+    env = os.environ.get("MINSYNC_CONTAINER_USER")
+    if env:
+        return env
+    if os.name == "posix":
+        uid, gid = os.getuid(), os.getgid()
+        if uid != 0:  # never run containers as root just because host does
+            return f"{uid}:{gid}"
+    return "10001:10001"
+
+
 @dataclass
 class Settings:
     data_dir: Path = field(default_factory=default_data_dir)
@@ -45,15 +64,45 @@ class Settings:
     max_file_bytes: int = field(default_factory=lambda: _int("MINSYNC_MAX_FILE_BYTES", 5_242_880))
     max_workspace_bytes: int = field(default_factory=lambda: _int("MINSYNC_MAX_WORKSPACE_BYTES", 209_715_200))
     max_archive_bytes: int = field(default_factory=lambda: _int("MINSYNC_MAX_ARCHIVE_BYTES", 20_971_520))
-    max_uncompressed_bytes: int = field(default_factory=lambda: _int("MINSYNC_MAX_UNCOMPRESSED_BYTES", 104_857_600))
+    max_uncompressed_bytes: int = field(
+        default_factory=lambda: _int("MINSYNC_MAX_UNCOMPRESSED_BYTES", 104_857_600)
+    )
     max_artifact_bytes: int = field(default_factory=lambda: _int("MINSYNC_MAX_ARTIFACT_BYTES", 52_428_800))
     max_archive_files: int = field(default_factory=lambda: _int("MINSYNC_MAX_ARCHIVE_FILES", 2000))
     max_archive_depth: int = field(default_factory=lambda: _int("MINSYNC_MAX_ARCHIVE_DEPTH", 20))
     task_retention_days: int = field(default_factory=lambda: _int("MINSYNC_TASK_RETENTION_DAYS", 7))
     docker_dir: str = field(default_factory=lambda: os.environ.get("MINSYNC_DOCKER_DIR", ""))
+    container_user: str = field(default_factory=_default_container_user)
     # 'disabled' (default, --network none) or 'approved' (plain bridge, explicit opt-in).
     # There is intentionally no fake 'restricted' mode: no verified egress proxy ships in v1.
-    default_network: str = field(default_factory=lambda: os.environ.get("MINSYNC_DEFAULT_NETWORK", "disabled"))
+    default_network: str = field(
+        default_factory=lambda: os.environ.get("MINSYNC_DEFAULT_NETWORK", "disabled")
+    )
+
+    def __post_init__(self) -> None:
+        self.data_dir = Path(self.data_dir)
+        if self.default_network not in NETWORK_MODES:
+            raise ValueError(
+                f"MINSYNC_DEFAULT_NETWORK must be one of {NETWORK_MODES}, got {self.default_network!r}"
+            )
+        parts = self.container_user.split(":")
+        if len(parts) != 2 or not all(p.isdigit() for p in parts):
+            raise ValueError(f"container_user must be 'uid:gid' (numeric), got {self.container_user!r}")
+        self.max_concurrent_tasks = max(1, self.max_concurrent_tasks)
+        self.max_timeout_seconds = max(1, self.max_timeout_seconds)
+        self.task_timeout_seconds = min(max(1, self.task_timeout_seconds), self.max_timeout_seconds)
+        self.memory_mb = max(16, self.memory_mb)
+        self.cpus = max(0.1, self.cpus)
+        self.pids_limit = max(16, self.pids_limit)
+        self.max_output_bytes = max(1024, self.max_output_bytes)
+        self.max_file_bytes = max(1024, self.max_file_bytes)
+        self.max_workspace_bytes = max(self.max_file_bytes, self.max_workspace_bytes)
+        self.max_archive_bytes = max(1024, self.max_archive_bytes)
+        self.max_uncompressed_bytes = max(1024, self.max_uncompressed_bytes)
+        self.max_artifact_bytes = max(1024, self.max_artifact_bytes)
+        self.max_archive_files = max(1, self.max_archive_files)
+        self.max_archive_depth = max(1, self.max_archive_depth)
+        self.task_retention_days = max(0, self.task_retention_days)
 
     @property
     def workspaces_dir(self) -> Path:
@@ -88,6 +137,7 @@ class Settings:
             "memory_mb": self.memory_mb,
             "cpus": self.cpus,
             "pids_limit": self.pids_limit,
+            "container_user": self.container_user,
             "max_output_bytes": self.max_output_bytes,
             "max_file_bytes": self.max_file_bytes,
             "max_archive_bytes": self.max_archive_bytes,

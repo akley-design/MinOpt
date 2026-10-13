@@ -5,7 +5,7 @@ The MCP client/LLM is semi-trusted: it may generate arbitrary code. That code mu
 
 ## Enforced controls (implemented, and covered by tests)
 - User code executes only as the command of `docker run` (argv list, no host shell). Verified: `tests/security` greps production source for `shell=True`/`os.system`/PowerShell and asserts hardening flags in the exact argv built by `DockerBackend.build_run_argv`.
-- Every container: `--cap-drop ALL`, `no-new-privileges`, uid 10001, `--read-only` rootfs + tmpfs `/tmp`, `--memory/--memory-swap` (512 MB default), `--cpus`, `--pids-limit`, `--network none` by default, one bind mount (the workspace only → `/workspace`). No Docker socket, no privileged, no host network, no client-supplied image/mount/flags (tool schemas contain none).
+- Every container: `--cap-drop ALL`, `no-new-privileges`, non-root uid (`MINSYNC_CONTAINER_USER`; host uid:gid on POSIX, never root, `10001:10001` on Windows), `--read-only` rootfs + tmpfs `/tmp`, `--memory/--memory-swap` (512 MB default), `--cpus`, `--pids-limit`, `--network none` by default, one bind mount (the workspace only → `/workspace`). No Docker socket, no privileged, no host network, no client-supplied image/mount/flags (tool schemas contain none).
 - Paths: workspace-relative only; absolute/drive/`..`/NUL/symlink escapes rejected (`security_paths.resolve_within`); symlink entries refused in ZIPs; write-through-symlink refused.
 - ZIP: limits on compressed/uncompressed size, file count, depth, compression ratio (bomb guards).
 - Output: bounded buffers (default 256 KiB/stream, `truncated` flag), task timeout kills the container, cancellation kills by container name.

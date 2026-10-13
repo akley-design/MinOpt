@@ -14,5 +14,6 @@ Environment variables only (see `.env.example`); defaults are conservative for a
 | `MINSYNC_TASK_RETENTION_DAYS` | 7 | old finished tasks pruned at startup |
 | `MINSYNC_DEFAULT_NETWORK` | `disabled` | `disabled` or `approved` |
 | `MINSYNC_DOCKER_DIR` | auto-detected | folder containing per-profile Dockerfile dirs |
+| `MINSYNC_CONTAINER_USER` | host uid:gid on POSIX (never 0), `10001:10001` on Windows | numeric `uid:gid` containers run as |
 
 No dynamic "auto RAM detection" is claimed — limits are fixed and explicit. Secrets: MinSync needs none; containers receive no host env/secrets.

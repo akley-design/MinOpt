@@ -26,18 +26,21 @@ class FakeBackend:
         self.cancelled.add(task_id)
         return True
 
-    async def run(self, *, profile, workspace_dir, task_id, command_argv,
-                  network, timeout_seconds):
+    async def run(self, *, profile, workspace_dir, task_id, command_argv, network, timeout_seconds):
         started = time.monotonic()
         joined = " ".join(command_argv)
         if "sleep" in joined:
             secs = float(command_argv[-1]) if command_argv[-1].replace(".", "").isdigit() else 5
-            if secs > timeout_seconds:
-                await asyncio.sleep(timeout_seconds)
-                return ExecResult(None, "", "", duration_ms=timeout_seconds * 1000, timed_out=True)
-            await asyncio.sleep(secs)
-            if task_id in self.cancelled:
-                return ExecResult(130, "", "", duration_ms=1, cancelled=True)
+            # poll cancellation like a real killed container would exit promptly
+            waited = 0.0
+            while waited < secs:
+                if task_id in self.cancelled:
+                    return ExecResult(None, "", "", duration_ms=1, cancelled=True)
+                if waited >= timeout_seconds:
+                    return ExecResult(None, "", "", duration_ms=timeout_seconds * 1000, timed_out=True)
+                step = min(0.05, secs - waited)
+                await asyncio.sleep(step)
+                waited += step
         if task_id in self.cancelled:
             return ExecResult(130, "", "", duration_ms=1, cancelled=True)
         if "fail" in joined:

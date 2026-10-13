@@ -1,5 +1,5 @@
 # Start MinSync MCP server (stdio by default - the mode MCP clients launch).
-param([string]$Transport = "stdio", [int]$Port = 8765)
+param([ValidateSet("stdio","streamable-http")][string]$Transport = "stdio", [ValidateRange(1,65535)][int]$Port = 8765)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root

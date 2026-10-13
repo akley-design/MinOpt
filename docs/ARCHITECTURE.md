@@ -34,5 +34,5 @@ backend streams stdout/stderr (bounded buffer) ──▶ TaskManager persists
   succeeded|failed|timed_out|cancelled + exit_code + duration ──▶ client
 ```
 
-Profiles are lazy: an image is `docker build`-ed from `docker/<profile>/Dockerfile` on first use only, then cached. Nothing heavy is pre-pulled.
+Profiles are lazy: an image is `docker build`-ed from `docker/<profile>/Dockerfile` on first use only, then cached (one build lock per image). Nothing heavy is pre-pulled. Containers are one-shot, so dependency installs persist **in the workspace**: pip `--target .minsync_deps` (+PYTHONPATH), npm `node_modules`, Go/Rust/.NET caches under `.cache/`, Maven `-Dmaven.repo.local=.cache/m2`. These caches are excluded from project ZIPs.
 Interrupted tasks are marked `failed/interrupted` on startup — never fake successes.
